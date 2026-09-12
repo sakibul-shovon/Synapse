@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "register": "tsx scripts/registerCommands.ts",
     "smoke:llm": "tsx scripts/smokeOpenRouter.ts",
-    "smoke:engine": "tsx scripts/smokeMemoryEngine.ts"
+    "smoke:engine": "tsx scripts/smokeMemoryEngine.ts",
+    "seed:discord": "tsx scripts/seedDiscordDemo.ts",
+    "ingest:discord-demo": "tsx scripts/ingestDiscordDemo.ts"
   },
   "dependencies": {
     "discord.js": "^14.16.3",

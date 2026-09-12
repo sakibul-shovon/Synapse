@@ -75,6 +75,7 @@ export async function listTasksForUser(input: {
          $4::text is null
          or lower(coalesce(owner_display_name, '')) like '%' || $4 || '%'
          or owner_user_id = $4
+         or lower(title || ' ' || coalesce(description, '')) like '%' || $4 || '%'
        )
      order by
        case when due_at is null then 1 else 0 end,
@@ -91,7 +92,8 @@ export async function listTasksForUser(input: {
   const lines = result.rows.map((task, index) => {
     const ownerText = task.owner_display_name ? ` - owner: ${task.owner_display_name}` : "";
     const dueText = task.due_at ? ` - due: ${task.due_at.toISOString().slice(0, 10)}` : "";
-    return `${index + 1}. ${task.title}${ownerText}${dueText} - status: ${task.status}`;
+    const descriptionText = task.description ? ` - ${task.description}` : "";
+    return `${index + 1}. ${task.title}${ownerText}${dueText} - status: ${task.status}${descriptionText}`;
   });
 
   return `Accessible tasks:\n${lines.join("\n")}`;

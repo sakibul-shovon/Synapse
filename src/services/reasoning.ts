@@ -21,6 +21,10 @@ export async function answerFromMemories(input: {
     maxTokens: 700,
   });
 
+  if (answer.toLowerCase().includes("do not have accessible evidence")) {
+    return "I do not have accessible evidence for that.";
+  }
+
   return `${answer}\n\n${formatSources(input.memories)}`;
 }
 

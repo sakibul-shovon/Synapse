@@ -202,7 +202,7 @@ async function insertExtractedMemories(
         visibilityChannelId: primarySource.channelId,
         createdByUserId: primarySource.authorId,
         ownerUserId: memory.task?.owner_user_id ?? null,
-        ownerDisplayName: memory.task?.owner_name ?? null,
+        ownerDisplayName: memory.task?.owner_name ?? inferTaskOwner(memory.summary, primarySource.content),
         title: memory.title,
         description: memory.summary,
         dueAt: normalizeDate(memory.task?.due_at),
@@ -244,7 +244,7 @@ async function insertExtractedMemories(
     });
   }
 
-  return { memories: insertedMemories, tasks: taskCount, drift: driftCount };
+  return { memories: await refreshMemoryStatuses(insertedMemories), tasks: taskCount, drift: driftCount };
 }
 
 async function insertRawMessage(client: PoolClient, message: RawMessageInput): Promise<void> {
@@ -312,4 +312,39 @@ function normalizeDate(value?: string | null): string | null {
 
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function inferTaskOwner(summary: string, sourceContent: string): string | null {
+  const text = `${sourceContent}\n${summary}`;
+  const patterns = [
+    /\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+(?:will|owns|must|should)\b/,
+    /\bTask:\s*([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+(?:will|owns|must|should)\b/,
+    /\bfor\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)?):/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1] && !["Task", "Decision", "Update", "Deadline"].includes(match[1])) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
+
+async function refreshMemoryStatuses(memories: MemoryResult[]): Promise<MemoryResult[]> {
+  if (memories.length === 0) {
+    return memories;
+  }
+
+  const result = await query<{ id: string; status: MemoryResult["status"] }>(
+    "select id, status from memories where id = any($1::uuid[])",
+    [memories.map((memory) => memory.id)],
+  );
+  const statusById = new Map(result.rows.map((row) => [row.id, row.status]));
+
+  return memories.map((memory) => ({
+    ...memory,
+    status: statusById.get(memory.id) ?? memory.status,
+  }));
 }

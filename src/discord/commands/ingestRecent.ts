@@ -39,7 +39,7 @@ export async function handleIngestRecent(
   const messages = await channel.messages.fetch({ limit });
   const rawMessages = [...messages.values()]
     .filter((message) => message.inGuild())
-    .filter((message) => !message.author.bot)
+    .filter((message) => !message.author.bot || Boolean(message.webhookId))
     .reverse()
     .map((message) => discordMessageToRawInput(message));
 
@@ -48,7 +48,7 @@ export async function handleIngestRecent(
     digestChannelId: config.defaultDigestChannelId,
   });
 
-  if (summary.digest) {
+  if (summary.digest && isPublicToEveryone(interaction.guild, channel)) {
     await postDigest(interaction, summary.digest);
   }
 
@@ -57,6 +57,13 @@ export async function handleIngestRecent(
       `Ingested ${summary.messages} messages.\nExtracted ${summary.memories} memories, ${summary.tasks} tasks.\nMarked ${summary.drift} decision drift update(s).`,
     ),
   );
+}
+
+function isPublicToEveryone(
+  guild: ChatInputCommandInteraction<"cached">["guild"],
+  channel: GuildTextBasedChannel,
+): boolean {
+  return Boolean(channel.permissionsFor(guild.roles.everyone)?.has(PermissionFlagsBits.ViewChannel));
 }
 
 function canFetchMessages(channel: unknown): channel is GuildTextBasedChannel {
@@ -108,4 +115,3 @@ async function getDigestChannelId(guildId: string): Promise<string | null> {
 
   return result.rows[0]?.digest_channel_id ?? config.defaultDigestChannelId ?? null;
 }
-

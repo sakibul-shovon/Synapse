@@ -4,6 +4,7 @@ export function pickProactiveMemories(memories: MemoryResult[]): MemoryResult[] 
   return memories.filter(
     (memory) =>
       ["decision", "deadline", "risk"].includes(memory.type) &&
+      memory.status !== "superseded" &&
       memory.importance >= 4 &&
       memory.sources.length > 0,
   );

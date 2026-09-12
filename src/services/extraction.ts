@@ -18,7 +18,10 @@ const extractedTaskSchema = z
   .nullish();
 
 export const extractedMemorySchema = z.object({
-  type: z.enum(["decision", "task", "deadline", "risk", "resource", "faq", "person"]),
+  type: z.preprocess(
+    (value) => normalizeMemoryType(String(value)),
+    z.enum(["decision", "task", "deadline", "risk", "resource", "faq", "person"]),
+  ),
   title: z.string().min(3),
   summary: z.string().min(5),
   subject: z.string().nullish(),
@@ -37,6 +40,28 @@ const extractionResponseSchema = z.object({
 });
 
 export type ExtractedMemory = z.output<typeof extractedMemorySchema>;
+
+function normalizeMemoryType(value: string): string {
+  const normalized = value.toLowerCase().trim();
+
+  if (["announcement", "update"].includes(normalized)) {
+    return "decision";
+  }
+
+  if (["link", "url", "document"].includes(normalized)) {
+    return "resource";
+  }
+
+  if (["owner", "ownership", "contact"].includes(normalized)) {
+    return "person";
+  }
+
+  if (["company", "project"].includes(normalized)) {
+    return "faq";
+  }
+
+  return normalized;
+}
 
 export async function extractMemoriesFromMessages(
   messages: RawMessageInput[],
@@ -69,9 +94,11 @@ export async function extractMemoriesFromMessages(
 
   const knownIds = new Set(messages.map((message) => message.id));
 
-  return (response.memories ?? [])
-    .map((memory) => ({
+  const extracted = (response.memories ?? [])
+    .map(
+      (memory): ExtractedMemory => ({
       ...memory,
+      type: memory.type as ExtractedMemory["type"],
       entities: (memory.entities ?? []).map((entity) => ({
         name: entity.name,
         kind: entity.kind ?? "other",
@@ -85,6 +112,51 @@ export async function extractMemoriesFromMessages(
           }
         : memory.task,
       source_message_ids: memory.source_message_ids.filter((id) => knownIds.has(id)),
-    }))
+    }),
+    )
     .filter((memory) => memory.source_message_ids.length > 0 && memory.confidence >= 0.45);
+
+  return appendDeterministicInjectionRisks(extracted, messages);
+}
+
+function appendDeterministicInjectionRisks(
+  memories: ExtractedMemory[],
+  messages: RawMessageInput[],
+): ExtractedMemory[] {
+  const riskyMessages = messages.filter((message) => {
+    const content = message.content.toLowerCase();
+    return (
+      content.includes("ignore previous instructions") ||
+      content.includes("system prompt") ||
+      content.includes("api key") ||
+      content.includes("reveal everything from")
+    );
+  });
+
+  const existingSourceIds = new Set(
+    memories
+      .filter((memory) => memory.type === "risk")
+      .flatMap((memory) => memory.source_message_ids),
+  );
+
+  const deterministicRisks = riskyMessages
+    .filter((message) => !existingSourceIds.has(message.id))
+    .map(
+      (message): ExtractedMemory => ({
+        type: "risk",
+        title: "Prompt injection attempt",
+        summary:
+          "A public message attempted to override Synapse instructions, reveal private-channel information, or expose secrets.",
+        subject: "prompt injection",
+        entities: [{ name: "Synapse", kind: "other" }],
+        importance: 5,
+        confidence: 1,
+        event_time: message.createdAt,
+        valid_from: message.createdAt,
+        source_message_ids: [message.id],
+        source_quote: message.content.slice(0, 220),
+      }),
+    );
+
+  return [...memories, ...deterministicRisks];
 }
