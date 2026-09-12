@@ -10,6 +10,8 @@ type TaskRow = {
   status: string;
   source_memory_id: string | null;
   channel_id: string;
+  source_url: string | null;
+  source_author: string | null;
 };
 
 export async function insertTask(input: {
@@ -24,6 +26,17 @@ export async function insertTask(input: {
   dueAt?: string | null;
   sourceMemoryId?: string | null;
 }): Promise<string> {
+  if (input.sourceMemoryId) {
+    const existing = await query<{ id: string }>(
+      "select id from tasks where source_memory_id = $1 limit 1",
+      [input.sourceMemoryId],
+    );
+
+    if (existing.rows[0]?.id) {
+      return existing.rows[0].id;
+    }
+  }
+
   const result = await query<{ id: string }>(
     `insert into tasks (
        guild_id,
@@ -90,7 +103,10 @@ export async function listTasksForUser(input: {
     const ownerText = task.owner_display_name ? ` - owner: ${task.owner_display_name}` : "";
     const dueText = task.due_at ? ` - due: ${task.due_at.toISOString().slice(0, 10)}` : "";
     const descriptionText = task.description ? ` - ${task.description}` : "";
-    return `${index + 1}. ${task.title}${ownerText}${dueText} - status: ${task.status}${descriptionText}`;
+    const sourceText = task.source_url
+      ? `\n   Source: ${task.source_author ?? "source"} - ${task.source_url}`
+      : "";
+    return `${index + 1}. ${task.title}${ownerText}${dueText} - status: ${task.status}${descriptionText}${sourceText}`;
   });
 
   return `${fallbackNote}Accessible tasks:\n${lines.join("\n")}`;
@@ -103,21 +119,40 @@ function findTasksForUser(
   status: string | null,
 ) {
   return query<TaskRow>(
-    `select id, title, description, owner_display_name, due_at, status, source_memory_id, channel_id
-     from tasks
-     where guild_id = $1
-       and visibility_channel_id = any($2::text[])
-       and ($3::text is null or status = $3)
+    `select
+       t.id,
+       t.title,
+       t.description,
+       t.owner_display_name,
+       t.due_at,
+       t.status,
+       t.source_memory_id,
+       t.channel_id,
+       src.message_url as source_url,
+       src.author_display_name as source_author
+     from tasks t
+     left join lateral (
+       select rm.message_url, rm.author_display_name
+       from memory_sources ms
+       join raw_messages rm on rm.id = ms.raw_message_id
+       where ms.memory_id = t.source_memory_id
+         and rm.channel_id = any($2::text[])
+       order by rm.created_at asc
+       limit 1
+     ) src on true
+     where t.guild_id = $1
+       and t.visibility_channel_id = any($2::text[])
+       and ($3::text is null or t.status = $3)
        and (
          $4::text is null
-         or lower(coalesce(owner_display_name, '')) like '%' || $4 || '%'
-         or owner_user_id = $4
-         or lower(title || ' ' || coalesce(description, '')) like '%' || $4 || '%'
+         or lower(coalesce(t.owner_display_name, '')) like '%' || $4 || '%'
+         or t.owner_user_id = $4
+         or lower(t.title || ' ' || coalesce(t.description, '')) like '%' || $4 || '%'
        )
      order by
-       case when due_at is null then 1 else 0 end,
-       due_at asc,
-       created_at desc
+       case when t.due_at is null then 1 else 0 end,
+       t.due_at asc,
+       t.created_at desc
      limit 15`,
     [ctx.guildId, permission.allowedChannelIds, status, owner],
   );

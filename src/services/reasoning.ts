@@ -25,7 +25,16 @@ export async function answerFromMemories(input: {
     return "I do not have accessible evidence for that.";
   }
 
-  return `${answer}\n\n${formatSources(input.memories)}`;
+  const citedIndexes = extractCitedEvidenceIndexes(answer);
+  if (!areCitationsValid(citedIndexes, input.memories.length)) {
+    return "I do not have accessible evidence for that.";
+  }
+
+  const citedMemories = citedIndexes.size
+    ? input.memories.filter((_, index) => citedIndexes.has(index))
+    : input.memories;
+
+  return `${answer}\n\n${formatSources(citedMemories)}`;
 }
 
 export async function summarizeMissed(input: {
@@ -110,4 +119,25 @@ function formatSources(memories: MemoryResult[], limit = 5): string {
   }
 
   return `Sources\n${lines.join("\n")}`;
+}
+
+function extractCitedEvidenceIndexes(answer: string): Set<number> {
+  const indexes = new Set<number>();
+  const matches = answer.matchAll(/\[S(\d+)\]/gi);
+
+  for (const match of matches) {
+    indexes.add(Number(match[1]) - 1);
+  }
+
+  return indexes;
+}
+
+function areCitationsValid(citedIndexes: Set<number>, evidenceCount: number): boolean {
+  for (const index of citedIndexes) {
+    if (!Number.isInteger(index) || index < 0 || index >= evidenceCount) {
+      return false;
+    }
+  }
+
+  return true;
 }

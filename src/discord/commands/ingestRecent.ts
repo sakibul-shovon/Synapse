@@ -43,12 +43,14 @@ export async function handleIngestRecent(
     .reverse()
     .map((message) => discordMessageToRawInput(message));
 
+  const digestAllowedChannelIds = isPublicToEveryone(interaction.guild, channel) ? [channel.id] : [];
   const summary = await synapseEngine.ingestMessages({
     messages: rawMessages,
     digestChannelId: config.defaultDigestChannelId,
+    digestAllowedChannelIds,
   });
 
-  if (summary.digest && isPublicToEveryone(interaction.guild, channel)) {
+  if (summary.digest) {
     await postDigest(interaction, summary.digest);
   }
 

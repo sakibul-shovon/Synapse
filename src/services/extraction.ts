@@ -81,16 +81,7 @@ export async function extractMemoriesFromMessages(
     url: message.messageUrl,
   }));
 
-  const response = await completeJson({
-    model: llmModels.extraction,
-    messages: [
-      { role: "system", content: extractionSystemPrompt },
-      { role: "user", content: buildExtractionUserPrompt(JSON.stringify(compactMessages, null, 2)) },
-    ],
-    schema: extractionResponseSchema,
-    temperature: 0,
-    maxTokens: 2000,
-  });
+  const response = await extractWithRetry(JSON.stringify(compactMessages, null, 2));
 
   const knownIds = new Set(messages.map((message) => message.id));
 
@@ -117,6 +108,44 @@ export async function extractMemoriesFromMessages(
     .filter((memory) => memory.source_message_ids.length > 0 && memory.confidence >= 0.45);
 
   return appendDeterministicInjectionRisks(extracted, messages);
+}
+
+async function extractWithRetry(messagesJson: string): Promise<z.output<typeof extractionResponseSchema>> {
+  const baseMessages = [
+    { role: "system" as const, content: extractionSystemPrompt },
+    { role: "user" as const, content: buildExtractionUserPrompt(messagesJson) },
+  ];
+
+  try {
+    const response = await completeJson({
+      model: llmModels.extraction,
+      messages: baseMessages,
+      schema: extractionResponseSchema,
+      temperature: 0,
+      maxTokens: 2000,
+    });
+
+    return { memories: (response.memories ?? []) as ExtractedMemory[] };
+  } catch (error) {
+    console.warn("Extraction JSON parse failed; retrying once.", error);
+  }
+
+  const response = await completeJson({
+    model: llmModels.extraction,
+    messages: [
+      ...baseMessages,
+      {
+        role: "user",
+        content:
+          "Retry because the previous response was not valid for the schema. Return strict JSON only, with a top-level memories array.",
+      },
+    ],
+    schema: extractionResponseSchema,
+    temperature: 0,
+    maxTokens: 2000,
+  });
+
+  return { memories: (response.memories ?? []) as ExtractedMemory[] };
 }
 
 function appendDeterministicInjectionRisks(

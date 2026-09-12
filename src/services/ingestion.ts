@@ -1,4 +1,6 @@
 import type { PoolClient } from "pg";
+import { createHash } from "crypto";
+import * as chrono from "chrono-node";
 import { query, withTransaction } from "../db";
 import type { IngestSummary, MemoryResult, RawMessageInput } from "../types/memory";
 import { insertTask } from "./actions";
@@ -140,6 +142,12 @@ async function insertExtractedMemories(
       continue;
     }
 
+    const fingerprint = buildMemoryFingerprint(memory);
+    const duplicate = await findExistingMemory(primarySource.guildId, fingerprint, memory);
+    if (duplicate) {
+      continue;
+    }
+
     const embedding = await embedText(`${memory.title}\n${memory.summary}\n${memory.subject ?? ""}`);
     const result = await query<{ id: string; created_at: Date }>(
       `insert into memories (
@@ -157,9 +165,10 @@ async function insertExtractedMemories(
          event_time,
          valid_from,
          source_quote,
-         embedding
+         embedding,
+         memory_fingerprint
        )
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
        returning id, created_at`,
       [
         primarySource.guildId,
@@ -173,10 +182,11 @@ async function insertExtractedMemories(
         JSON.stringify(memory.entities),
         memory.importance,
         memory.confidence,
-        normalizeDate(memory.event_time),
-        normalizeDate(memory.valid_from),
+        normalizeDate(memory.event_time, primarySource.createdAt),
+        normalizeDate(memory.valid_from, primarySource.createdAt),
         memory.source_quote ?? null,
         toPgVector(embedding),
+        fingerprint,
       ],
     );
 
@@ -205,7 +215,9 @@ async function insertExtractedMemories(
         ownerDisplayName: memory.task?.owner_name ?? inferTaskOwner(memory.summary, primarySource.content),
         title: memory.title,
         description: memory.summary,
-        dueAt: normalizeDate(memory.task?.due_at),
+        dueAt:
+          normalizeDate(memory.task?.due_at, primarySource.createdAt) ??
+          inferDueDate(memory.summary, primarySource.content, primarySource.createdAt),
         sourceMemoryId: memoryId,
       });
       taskCount += 1;
@@ -214,6 +226,7 @@ async function insertExtractedMemories(
     if (memory.type === "decision") {
       driftCount += await processDecisionDrift({
         guildId: primarySource.guildId,
+        channelId: primarySource.channelId,
         newMemoryId: memoryId,
         subject: memory.subject,
         summary: memory.summary,
@@ -229,7 +242,7 @@ async function insertExtractedMemories(
       subject: memory.subject ?? undefined,
       importance: memory.importance,
       createdAt: result.rows[0].created_at.toISOString(),
-      eventTime: normalizeDate(memory.event_time) ?? undefined,
+      eventTime: normalizeDate(memory.event_time, primarySource.createdAt) ?? undefined,
       sources: memory.source_message_ids
         .map((messageId) => messageById.get(messageId))
         .filter((message): message is RawMessageInput => Boolean(message))
@@ -293,6 +306,41 @@ async function insertRawMessage(client: PoolClient, message: RawMessageInput): P
   );
 }
 
+async function findExistingMemory(
+  guildId: string,
+  fingerprint: string,
+  memory: ExtractedMemory,
+): Promise<string | null> {
+  const result = await query<{ id: string }>(
+    `select m.id
+     from memories m
+     where m.guild_id = $1
+       and (
+         m.memory_fingerprint = $2
+         or (
+           m.type = $3
+           and exists (
+             select 1
+             from memory_sources ms
+             where ms.memory_id = m.id
+               and ms.raw_message_id = any($4::text[])
+           )
+         )
+       )
+     limit 1`,
+    [guildId, fingerprint, memory.type, memory.source_message_ids],
+  );
+
+  return result.rows[0]?.id ?? null;
+}
+
+function buildMemoryFingerprint(memory: ExtractedMemory): string {
+  const sourceIds = [...memory.source_message_ids].sort().join(",");
+  const rawFingerprint = [memory.type, sourceIds].join("|");
+
+  return createHash("sha256").update(rawFingerprint).digest("hex");
+}
+
 async function startExtractionRun(messages: RawMessageInput[]): Promise<string> {
   const first = messages[0];
   const result = await query<{ id: string }>(
@@ -305,13 +353,20 @@ async function startExtractionRun(messages: RawMessageInput[]): Promise<string> 
   return result.rows[0].id;
 }
 
-function normalizeDate(value?: string | null): string | null {
+function normalizeDate(value?: string | null, referenceIso?: string): string | null {
   if (!value) {
     return null;
   }
 
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  const directDate = new Date(value);
+  if (!Number.isNaN(directDate.getTime())) {
+    return directDate.toISOString();
+  }
+
+  const referenceDate = referenceIso ? new Date(referenceIso) : new Date();
+  const parsedDate = chrono.parseDate(value, referenceDate, { forwardDate: true });
+
+  return parsedDate ? parsedDate.toISOString() : null;
 }
 
 function inferTaskOwner(summary: string, sourceContent: string): string | null {
@@ -330,6 +385,17 @@ function inferTaskOwner(summary: string, sourceContent: string): string | null {
   }
 
   return null;
+}
+
+function inferDueDate(summary: string, sourceContent: string, referenceIso: string): string | null {
+  const text = `${sourceContent}\n${summary}`;
+  const match = text.match(/\b(?:by|before|due(?:\s+on)?)\s+([^.,;\n]+)/i);
+
+  if (!match?.[1]) {
+    return null;
+  }
+
+  return normalizeDate(match[1], referenceIso);
 }
 
 async function refreshMemoryStatuses(memories: MemoryResult[]): Promise<MemoryResult[]> {

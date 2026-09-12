@@ -5,6 +5,7 @@ export interface MemoryEngine {
   ingestMessages(input: {
     messages: RawMessageInput[];
     digestChannelId?: string;
+    digestAllowedChannelIds?: string[];
   }): Promise<IngestSummary>;
 
   ingestRecent(input: {
@@ -12,6 +13,7 @@ export interface MemoryEngine {
     channelId: string;
     limit: number;
     digestChannelId?: string;
+    digestAllowedChannelIds?: string[];
   }): Promise<IngestSummary>;
 
   ask(input: {

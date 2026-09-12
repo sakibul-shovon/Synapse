@@ -1,4 +1,5 @@
 import type { MemoryEngine } from "./contracts";
+import * as chrono from "chrono-node";
 import { ingestMessages as ingestMessageBatch, ingestStoredRecent } from "./ingestion";
 import { listTasksForUser } from "./actions";
 import { buildProactiveDigest } from "./proactive";
@@ -10,7 +11,7 @@ export const synapseEngine: MemoryEngine = {
     const result = await ingestMessageBatch(input.messages);
     return {
       ...result.summary,
-      digest: buildProactiveDigest(result.insertedMemories),
+      digest: buildProactiveDigest(result.insertedMemories, input.digestAllowedChannelIds),
     };
   },
 
@@ -23,7 +24,7 @@ export const synapseEngine: MemoryEngine = {
 
     return {
       ...result.summary,
-      digest: buildProactiveDigest(result.insertedMemories),
+      digest: buildProactiveDigest(result.insertedMemories, input.digestAllowedChannelIds),
     };
   },
 
@@ -98,6 +99,11 @@ function parseSince(value: string): string {
   const parsed = new Date(value);
   if (!Number.isNaN(parsed.getTime())) {
     return parsed.toISOString();
+  }
+
+  const chronoDate = chrono.parseDate(value, now, { forwardDate: false });
+  if (chronoDate) {
+    return chronoDate.toISOString();
   }
 
   const fallback = new Date(now.getTime() - 24 * 60 * 60 * 1000);

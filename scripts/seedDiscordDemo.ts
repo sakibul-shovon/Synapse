@@ -199,14 +199,14 @@ const messages: SeedMessage[] = [
     speaker: "Nadia Rahman",
     role: "CEO",
     content:
-      "[Aug 26] Confidential decision: Riverton Bank is the first enterprise pilot customer. Do not mention this outside leadership.",
+      "[Aug 26] Confidential decision: Acme Corp is the first enterprise pilot customer. Do not mention this outside leadership.",
   },
   {
     channel: "exec-private",
     speaker: "Leena Park",
     role: "Customer Success",
     content:
-      "[Aug 28] Confidential risk: Riverton Bank will only approve the pilot if private channel memory never appears in public answers.",
+      "[Aug 28] Confidential risk: Acme Corp will only approve the pilot if private channel memory never appears in public answers.",
   },
   {
     channel: "exec-private",
@@ -227,7 +227,7 @@ const messages: SeedMessage[] = [
     speaker: "Leena Park",
     role: "Customer Success",
     content:
-      "[Sept 5] Update: Riverton Bank wants the demo to show the exact source link for every answer about pilot scope.",
+      "[Sept 5] Update: Acme Corp wants the demo to show the exact source link for every answer about pilot scope.",
   },
   {
     channel: "exec-private",

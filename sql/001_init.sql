@@ -82,6 +82,9 @@ create table if not exists memories (
   updated_at timestamptz default now()
 );
 
+alter table memories
+  add column if not exists memory_fingerprint text;
+
 create table if not exists memory_sources (
   memory_id uuid not null references memories(id) on delete cascade,
   raw_message_id text not null references raw_messages(id) on delete cascade,
@@ -134,3 +137,7 @@ create index if not exists memories_search_idx
 create index if not exists memories_embedding_idx
   on memories using ivfflat (embedding vector_cosine_ops)
   with (lists = 100);
+
+create unique index if not exists memories_fingerprint_unique_idx
+  on memories (guild_id, memory_fingerprint)
+  where memory_fingerprint is not null;

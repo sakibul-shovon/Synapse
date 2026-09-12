@@ -6,6 +6,7 @@ import { buildDriftUserPrompt, driftSystemPrompt } from "../prompts/driftPrompt"
 
 type DecisionRow = {
   id: string;
+  title: string;
   summary: string;
   subject: string | null;
   created_at: Date;
@@ -20,31 +21,41 @@ const driftWords = ["not", "instead", "changed", "now", "supersede", "replace", 
 
 export async function processDecisionDrift(input: {
   guildId: string;
+  channelId: string;
   newMemoryId: string;
   subject?: string | null;
   summary: string;
 }): Promise<number> {
-  if (!input.subject) {
+  const candidateQuery = buildDecisionCandidateQuery(input.subject, input.summary);
+
+  if (!input.subject && !candidateQuery) {
     return 0;
   }
 
   const existing = await query<DecisionRow>(
-    `select id, summary, subject, created_at
+    `select id, title, summary, subject, created_at
      from memories
      where guild_id = $1
+       and channel_id = $5
        and type = 'decision'
        and status = 'active'
        and id <> $2
-       and lower(coalesce(subject, '')) = lower($3)
+       and (
+         ($3::text <> '' and lower(coalesce(subject, '')) = lower($3))
+         or ($4::text <> '' and search_text @@ to_tsquery('english', $4))
+       )
      order by created_at desc
-     limit 3`,
-    [input.guildId, input.newMemoryId, input.subject],
+     limit 6`,
+    [input.guildId, input.newMemoryId, input.subject ?? "", candidateQuery, input.channelId],
   );
 
   let driftCount = 0;
 
   for (const oldDecision of existing.rows) {
-    const relationship = await classifyDecisionRelationship(oldDecision.summary, input.summary);
+    const relationship = await classifyDecisionRelationship(
+      `${oldDecision.title}\n${oldDecision.summary}`,
+      input.summary,
+    );
 
     if (relationship === "supersedes") {
       await query(
@@ -75,6 +86,38 @@ export async function processDecisionDrift(input: {
   }
 
   return driftCount;
+}
+
+function buildDecisionCandidateQuery(subject?: string | null, summary?: string): string {
+  const stopWords = new Set([
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "by",
+    "for",
+    "from",
+    "is",
+    "not",
+    "now",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "we",
+    "will",
+    "with",
+  ]);
+
+  const tokens = `${subject ?? ""} ${summary ?? ""}`
+    .toLowerCase()
+    .match(/[a-z0-9]+/g)
+    ?.filter((token) => token.length > 2 && !stopWords.has(token))
+    .slice(0, 8);
+
+  return tokens?.length ? tokens.map((token) => `${token}:*`).join(" | ") : "";
 }
 
 async function classifyDecisionRelationship(

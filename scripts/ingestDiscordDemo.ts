@@ -38,14 +38,20 @@ try {
       .reverse()
       .map((message) => discordMessageToRawInput(message));
 
-    const summary = await synapseEngine.ingestMessages({ messages: rawMessages });
+    const isPublicSource = Boolean(
+      channel.permissionsFor(guild.roles.everyone)?.has(PermissionFlagsBits.ViewChannel),
+    );
+    const summary = await synapseEngine.ingestMessages({
+      messages: rawMessages,
+      digestAllowedChannelIds: isPublicSource ? [channel.id] : [],
+    });
     logger.info("Ingested Discord demo channel", { channel: channelName, summary });
 
     if (
       summary.digest &&
       digestChannel &&
       "send" in digestChannel &&
-      channel.permissionsFor(guild.roles.everyone)?.has(PermissionFlagsBits.ViewChannel)
+      isPublicSource
     ) {
       await digestChannel.send(formatReply(summary.digest));
     }
@@ -53,4 +59,3 @@ try {
 } finally {
   client.destroy();
 }
-
