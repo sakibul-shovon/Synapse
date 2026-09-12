@@ -5,10 +5,8 @@ export function createDiscordClient(): Client<true> {
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.GuildMembers,
       GatewayIntentBits.MessageContent,
     ],
     partials: [Partials.Channel, Partials.Message],
   }) as Client<true>;
 }
-

@@ -128,7 +128,13 @@ async function insertExtractedMemories(
   let taskCount = 0;
   let driftCount = 0;
 
-  for (const memory of extracted) {
+  const chronologicalMemories = [...extracted].sort((left, right) => {
+    const leftSource = messageById.get(left.source_message_ids[0]);
+    const rightSource = messageById.get(right.source_message_ids[0]);
+    return (leftSource?.createdAt ?? "").localeCompare(rightSource?.createdAt ?? "");
+  });
+
+  for (const memory of chronologicalMemories) {
     const primarySource = messageById.get(memory.source_message_ids[0]);
     if (!primarySource) {
       continue;

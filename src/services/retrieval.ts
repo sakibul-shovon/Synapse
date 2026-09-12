@@ -38,6 +38,13 @@ export async function searchAuthorizedMemories(input: {
 
   const limit = input.limit ?? 12;
   const keywordRows = await keywordSearch(input);
+  const looseRows =
+    keywordRows.length > 0
+      ? []
+      : await looseKeywordSearch({
+          ...input,
+          looseQuery: buildLooseTsQuery(input.queryText),
+        });
 
   let vectorRows: MemoryRow[] = [];
   const embedding = await embedText(input.queryText);
@@ -64,7 +71,7 @@ export async function searchAuthorizedMemories(input: {
     vectorRows = result.rows;
   }
 
-  const merged = mergeMemoryRows(keywordRows, vectorRows).slice(0, limit);
+  const merged = mergeMemoryRows([...keywordRows, ...looseRows], vectorRows).slice(0, limit);
   return attachSources(merged, input.permission);
 }
 
@@ -151,6 +158,42 @@ async function keywordSearch(input: {
   return result.rows;
 }
 
+async function looseKeywordSearch(input: {
+  ctx: RequestContext;
+  permission: PermissionScope;
+  queryText: string;
+  looseQuery: string;
+  types?: MemoryType[];
+  limit?: number;
+}): Promise<MemoryRow[]> {
+  if (!input.looseQuery) {
+    return [];
+  }
+
+  const result = await query<MemoryRow>(
+    `select id, type, status, title, summary, subject, importance, event_time, created_at
+     from memories
+     where guild_id = $1
+       and visibility_channel_id = any($2::text[])
+       and ($3::memory_type[] is null or type = any($3::memory_type[]))
+       and search_text @@ to_tsquery('english', $4)
+     order by
+       ts_rank(search_text, to_tsquery('english', $4)) desc,
+       importance desc,
+       created_at desc
+     limit $5`,
+    [
+      input.ctx.guildId,
+      input.permission.allowedChannelIds,
+      input.types?.length ? input.types : null,
+      input.looseQuery,
+      (input.limit ?? 12) * 2,
+    ],
+  );
+
+  return result.rows;
+}
+
 function mergeMemoryRows(primary: MemoryRow[], secondary: MemoryRow[]): MemoryRow[] {
   const seen = new Set<string>();
   const merged: MemoryRow[] = [];
@@ -163,6 +206,37 @@ function mergeMemoryRows(primary: MemoryRow[], secondary: MemoryRow[]): MemoryRo
   }
 
   return merged;
+}
+
+function buildLooseTsQuery(queryText: string): string {
+  const stopWords = new Set([
+    "a",
+    "an",
+    "and",
+    "are",
+    "about",
+    "current",
+    "did",
+    "for",
+    "is",
+    "me",
+    "of",
+    "on",
+    "the",
+    "to",
+    "we",
+    "what",
+    "when",
+    "who",
+  ]);
+
+  const tokens = queryText
+    .toLowerCase()
+    .match(/[a-z0-9]+/g)
+    ?.filter((token) => token.length > 2 && !stopWords.has(token))
+    .slice(0, 8);
+
+  return tokens?.length ? tokens.map((token) => `${token}:*`).join(" | ") : "";
 }
 
 async function attachSources(
