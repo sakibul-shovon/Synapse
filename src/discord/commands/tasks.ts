@@ -2,6 +2,7 @@ import type { ChatInputCommandInteraction } from "discord.js";
 import { synapseEngine } from "../../services/memoryEngine";
 import { getPermissionScope } from "../../services/permissions";
 import type { RequestContext } from "../../types/context";
+import { logger } from "../../utils/logger";
 import { formatReply } from "../format";
 
 export async function handleTasks(interaction: ChatInputCommandInteraction<"cached">): Promise<void> {
@@ -19,6 +20,15 @@ export async function handleTasks(interaction: ChatInputCommandInteraction<"cach
     status,
   });
 
+  logger.info("Handled tasks command", {
+    userId: interaction.user.id,
+    username: interaction.user.username,
+    owner,
+    status,
+    allowedChannelIds: permission.allowedChannelIds,
+    responsePreview: response.slice(0, 120),
+  });
+
   await interaction.editReply(formatReply(response));
 }
 
@@ -30,4 +40,3 @@ function buildContext(interaction: ChatInputCommandInteraction<"cached">): Reque
     username: interaction.user.username,
   };
 }
-

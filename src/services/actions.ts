@@ -62,10 +62,47 @@ export async function listTasksForUser(input: {
   owner?: string;
   status?: string;
 }): Promise<string> {
-  const owner = input.owner?.toLowerCase();
-  const status = input.status ?? "open";
+  const owner = normalizeTaskFilter(input.owner);
+  const status = normalizeTaskFilter(input.status);
 
-  const result = await query<TaskRow>(
+  let result = await findTasksForUser(input.ctx, input.permission, owner, status);
+  let fallbackNote = "";
+
+  if (result.rows.length === 0 && status) {
+    result = await findTasksForUser(input.ctx, input.permission, owner, null);
+    if (result.rows.length > 0) {
+      fallbackNote = `No tasks matched status "${status}". Showing accessible tasks without that filter.\n`;
+    }
+  }
+
+  if (result.rows.length === 0 && owner) {
+    result = await findTasksForUser(input.ctx, input.permission, null, status);
+    if (result.rows.length > 0) {
+      fallbackNote = `No tasks matched owner "${owner}". Showing accessible tasks instead.\n`;
+    }
+  }
+
+  if (result.rows.length === 0) {
+    return "No accessible tasks found.";
+  }
+
+  const lines = result.rows.map((task, index) => {
+    const ownerText = task.owner_display_name ? ` - owner: ${task.owner_display_name}` : "";
+    const dueText = task.due_at ? ` - due: ${task.due_at.toISOString().slice(0, 10)}` : "";
+    const descriptionText = task.description ? ` - ${task.description}` : "";
+    return `${index + 1}. ${task.title}${ownerText}${dueText} - status: ${task.status}${descriptionText}`;
+  });
+
+  return `${fallbackNote}Accessible tasks:\n${lines.join("\n")}`;
+}
+
+function findTasksForUser(
+  ctx: RequestContext,
+  permission: PermissionScope,
+  owner: string | null,
+  status: string | null,
+) {
+  return query<TaskRow>(
     `select id, title, description, owner_display_name, due_at, status, source_memory_id, channel_id
      from tasks
      where guild_id = $1
@@ -82,19 +119,11 @@ export async function listTasksForUser(input: {
        due_at asc,
        created_at desc
      limit 15`,
-    [input.ctx.guildId, input.permission.allowedChannelIds, status, owner ?? null],
+    [ctx.guildId, permission.allowedChannelIds, status, owner],
   );
+}
 
-  if (result.rows.length === 0) {
-    return "No accessible tasks found.";
-  }
-
-  const lines = result.rows.map((task, index) => {
-    const ownerText = task.owner_display_name ? ` - owner: ${task.owner_display_name}` : "";
-    const dueText = task.due_at ? ` - due: ${task.due_at.toISOString().slice(0, 10)}` : "";
-    const descriptionText = task.description ? ` - ${task.description}` : "";
-    return `${index + 1}. ${task.title}${ownerText}${dueText} - status: ${task.status}${descriptionText}`;
-  });
-
-  return `Accessible tasks:\n${lines.join("\n")}`;
+function normalizeTaskFilter(value?: string): string | null {
+  const normalized = value?.trim().replace(/^["']+|["']+$/g, "").toLowerCase();
+  return normalized || null;
 }
