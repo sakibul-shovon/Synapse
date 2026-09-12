@@ -36,7 +36,7 @@ const extractionResponseSchema = z.object({
   memories: z.array(extractedMemorySchema).default([]),
 });
 
-export type ExtractedMemory = z.infer<typeof extractedMemorySchema>;
+export type ExtractedMemory = z.output<typeof extractedMemorySchema>;
 
 export async function extractMemoriesFromMessages(
   messages: RawMessageInput[],
@@ -69,9 +69,21 @@ export async function extractMemoriesFromMessages(
 
   const knownIds = new Set(messages.map((message) => message.id));
 
-  return response.memories
+  return (response.memories ?? [])
     .map((memory) => ({
       ...memory,
+      entities: (memory.entities ?? []).map((entity) => ({
+        name: entity.name,
+        kind: entity.kind ?? "other",
+      })),
+      task: memory.task
+        ? {
+            owner_name: memory.task.owner_name,
+            owner_user_id: memory.task.owner_user_id,
+            due_at: memory.task.due_at,
+            status: "open" as const,
+          }
+        : memory.task,
       source_message_ids: memory.source_message_ids.filter((id) => knownIds.has(id)),
     }))
     .filter((memory) => memory.source_message_ids.length > 0 && memory.confidence >= 0.45);
