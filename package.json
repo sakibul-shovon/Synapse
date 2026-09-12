@@ -13,6 +13,7 @@
     "smoke:engine": "tsx scripts/smokeMemoryEngine.ts",
     "seed:discord": "tsx scripts/seedDiscordDemo.ts",
     "ingest:discord-demo": "tsx scripts/ingestDiscordDemo.ts",
+    "reset:judge-demo": "tsx scripts/resetJudgeDemo.ts",
     "verify:discord": "tsx scripts/verifyDiscordDemo.ts"
   },
   "dependencies": {
